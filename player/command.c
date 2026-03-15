@@ -1282,7 +1282,7 @@ static int tag_property(int action, void *arg, struct mp_tags *tags)
     case M_PROPERTY_KEY_ACTION: {
         struct m_property_action_arg *ka = arg;
         bstr key;
-        char *rem;
+        const char *rem;
         m_property_split_path(ka->key, &key, &rem);
         if (bstr_equals0(key, "list")) {
             struct m_property_action_arg nka = *ka;
@@ -1352,7 +1352,7 @@ static int mp_property_filter_metadata(void *ctx, struct m_property *prop,
     if (action == M_PROPERTY_KEY_ACTION) {
         struct m_property_action_arg *ka = arg;
         bstr key;
-        char *rem;
+        const char *rem;
         m_property_split_path(ka->key, &key, &rem);
         struct mp_tags *metadata = NULL;
         struct mp_output_chain *chain = NULL;
@@ -2115,7 +2115,7 @@ static int get_track_entry(int item, int action, void *arg, void *ctx)
         struct m_property_action_arg *ka = arg;
         if (!strncmp(ka->key, "metadata/", 9)) {
             bstr key = {0};
-            char *rem = "";
+            const char *rem = "";
             m_property_split_path(ka->key, &key, &rem);
             ka->key = rem;
             if (!rem[0]) {
@@ -2253,7 +2253,7 @@ static int mp_property_current_tracks(void *ctx, struct m_property *prop,
 
     struct m_property_action_arg *ka = arg;
     bstr key;
-    char *rem;
+    const char *rem;
     m_property_split_path(ka->key, &key, &rem);
 
     if (bstr_equals0(key, "video")) {
@@ -2422,16 +2422,9 @@ static int property_imgparams(const struct mp_image_params *p, int action, void 
         for (int i = 0; i < desc.num_planes; i++)
             bpp += desc.bpp[i] >> (desc.xs[i] + desc.ys[i]);
 
-#if PL_API_VER >= 344
         // If PL_ALPHA_NONE is supported, use it directly, unless in auto mode.
         if ((desc.flags & MP_IMGFLAG_ALPHA) && alpha == PL_ALPHA_UNKNOWN)
             alpha = PL_ALPHA_INDEPENDENT;
-#else
-        // Alpha type is not supported by FFmpeg, so PL_ALPHA_UNKNOWN may mean alpha
-        // is of an unknown type, or simply not present. Normalize to AUTO=no alpha.
-        if (!!(desc.flags & MP_IMGFLAG_ALPHA) != (alpha != PL_ALPHA_UNKNOWN))
-            alpha = (desc.flags & MP_IMGFLAG_ALPHA) ? PL_ALPHA_INDEPENDENT : PL_ALPHA_UNKNOWN;
-#endif
     }
 
     const struct pl_hdr_metadata *hdr = &p->color.hdr;
@@ -3505,11 +3498,11 @@ static int mp_property_playlist(void *ctx, struct m_property *prop,
             if (pl->current == e)
                 res = append_selected_style(mpctx, res);
             const char *reset = pl->current == e ? get_style_reset(mpctx) : "";
-            char *p = e->title;
+            const char *p = e->title;
             if (!p || mpctx->opts->playlist_entry_name > 0) {
                 p = e->filename;
                 if (!mp_is_url(bstr0(p))) {
-                    char *s = mp_basename(e->filename);
+                    const char *s = mp_basename(e->filename);
                     if (s[0])
                         p = s;
                 }
@@ -3874,7 +3867,7 @@ static int mp_property_option_info(void *ctx, struct m_property *prop,
     case M_PROPERTY_KEY_ACTION: {
         struct m_property_action_arg *ka = arg;
         bstr key;
-        char *rem;
+        const char *rem;
         m_property_split_path(ka->key, &key, &rem);
         struct m_config_option *co = m_config_get_co(mpctx->mconfig, key);
         if (!co)
@@ -4134,7 +4127,7 @@ static int do_op_udata(struct udata_ctx* ctx, int action, void *arg)
 
         // See if the next layer down will also be a sub-object access
         bstr key;
-        char *rem;
+        const char *rem;
         bool has_split = m_property_split_path(act->key, &key, &rem);
 
         if (!has_split && act->action == M_PROPERTY_DELETE) {
@@ -5152,6 +5145,28 @@ static void replace_overlay(struct MPContext *mpctx, int id, struct overlay *new
     recreate_overlays(mpctx);
 }
 
+static bool
+fread_pic(FILE *fp, mp_image_t *dst, size_t bytesPerLine, size_t h, size_t stride, size_t offset)
+{
+    size_t bytesRead = 0, expectedBytes = h * bytesPerLine;
+    size_t src_off = offset, dst_off = 0;
+    if (stride == dst->stride[0]) {
+        fseek(fp, src_off, SEEK_SET);
+        bytesRead = fread(dst->planes[0], 1, expectedBytes, fp);
+    } else {
+        for (int i = 0; i < h; i++) {
+            fseek(fp, src_off, SEEK_SET);
+            size_t r = fread(dst->planes[0] + dst_off, 1, bytesPerLine, fp);
+            if (r != bytesPerLine)
+                break;
+            bytesRead += bytesPerLine;
+            src_off += stride;
+            dst_off += dst->stride[0];
+        }
+    }
+    return bytesRead == expectedBytes;
+}
+
 static void cmd_overlay_add(void *pcmd)
 {
     struct mp_cmd_ctx *cmd = pcmd;
@@ -5189,14 +5204,12 @@ static void cmd_overlay_add(void *pcmd)
     if (!overlay.source)
         goto error;
     int fd = -1;
-    bool close_fd = true;
     void *p = NULL;
     if (file[0] == '@') {
         char *end;
-        fd = strtol(&file[1], &end, 10);
-        if (!file[1] || end[0])
-            fd = -1;
-        close_fd = false;
+        int srcfd = strtol(&file[1], &end, 10);
+        if (file[1] && end[0] == '\0' && srcfd >= 0)
+            fd = mp_dup_cloexec(srcfd); // fdopen will "own" the fd
     } else if (file[0] == '&') {
         char *end;
         unsigned long long addr = strtoull(&file[1], &end, 0);
@@ -5206,24 +5219,22 @@ static void cmd_overlay_add(void *pcmd)
     } else {
         fd = open(file, O_RDONLY | O_BINARY | O_CLOEXEC);
     }
-    size_t map_size = 0;
-    if (fd >= 0) {
-        map_size = offset + h * stride;
-        void *m = mmap(NULL, map_size, PROT_READ, MAP_SHARED, fd, 0);
-        if (close_fd)
-            close(fd);
-        if (m && m != MAP_FAILED)
-            p = m;
+
+    FILE *fp = (fd >= 0) ? fdopen(fd, "rb") : NULL;
+    int open_or_read_err = 1, bytesPerLine = w * 4;
+    if (p) {
+        memcpy_pic(overlay.source->planes[0], (char *)p + offset, bytesPerLine,
+                   h, overlay.source->stride[0], stride);
+        open_or_read_err = 0;
+    } else if (fp) {
+        open_or_read_err = !fread_pic(fp, overlay.source, bytesPerLine, h, stride, offset);
+        fclose(fp);
     }
-    if (!p) {
-        MP_ERR(mpctx, "overlay-add: could not open or map '%s'\n", file);
+    if (open_or_read_err) {
+        MP_ERR(mpctx, "overlay-add: could not open or read '%s'\n", file);
         talloc_free(overlay.source);
         goto error;
     }
-    memcpy_pic(overlay.source->planes[0], (char *)p + offset, w * 4, h,
-               overlay.source->stride[0], stride);
-    if (map_size)
-        munmap(p, map_size);
 
     replace_overlay(mpctx, id, &overlay);
     return;
