@@ -35,7 +35,7 @@ struct vulkan_opts {
 
 static inline OPT_STRING_VALIDATE_FUNC(vk_validate_dev)
 {
-    int ret = M_OPT_INVALID;
+    int ret = M_OPT_EXIT;
     void *ta_ctx = talloc_new(NULL);
     pl_log pllog = mppl_log_create(ta_ctx, log);
     if (!pllog)
@@ -45,13 +45,17 @@ static inline OPT_STRING_VALIDATE_FUNC(vk_validate_dev)
     mppl_log_set_probing(pllog, true);
     pl_vk_inst inst = pl_vk_inst_create(pllog, pl_vk_inst_params());
     mppl_log_set_probing(pllog, false);
-    if (!inst)
+    if (!inst) {
+        mp_info(log, "Failed to create Vulkan instance\n");
         goto done;
+    }
 
     uint32_t num = 0;
     VkResult res = vkEnumeratePhysicalDevices(inst->instance, &num, NULL);
-    if (res != VK_SUCCESS)
+    if (res != VK_SUCCESS) {
+        mp_info(log, "Failed to enumerate Vulkan devices\n");
         goto done;
+    }
 
     VkPhysicalDevice *devices = talloc_array(ta_ctx, VkPhysicalDevice, num);
     res = vkEnumeratePhysicalDevices(inst->instance, &num, devices);
@@ -60,10 +64,8 @@ static inline OPT_STRING_VALIDATE_FUNC(vk_validate_dev)
 
     struct bstr param = bstr0(*value);
     bool help = bstr_equals0(param, "help");
-    if (help) {
+    if (help)
         mp_info(log, "Available vulkan devices:\n");
-        ret = M_OPT_EXIT;
-    }
 
     AVUUID param_uuid;
     bool is_uuid = av_uuid_parse(*value, param_uuid) == 0;
@@ -425,9 +427,7 @@ bool ra_vk_ctx_init(struct ra_ctx *ctx, struct mpvk_ctx *vk,
         .surface = vk->surface,
         .present_mode = preferred_mode,
         .swapchain_depth = ctx->vo->opts->swapchain_depth,
-#if PL_API_VER >= 359
         .alpha_bits = ctx->opts.want_alpha ? 8 : 0,
-#endif
     };
 
     if (p->opts->swap_mode >= 0) // user override
@@ -538,10 +538,12 @@ static bool set_color(struct ra_swapchain *sw, struct mp_image_params *params)
     bool supported = PL_API_VER >= 361 || !waylandvk;
     if (supported && p->params.set_color) {
         if (waylandvk && params) {
-            // Request VK_COLOR_SPACE_PASS_THROUGH_EXT
-            pl_swapchain_colorspace_hint(p->vk->swapchain, &(struct pl_color_space){0});
-            // Do the resize in case surface format needs to change.
-            pl_swapchain_resize(p->vk->swapchain, &(int){0}, &(int){0});
+          // Request VK_COLOR_SPACE_PASS_THROUGH_EXT, and also force immediate
+          // cleanup of swapchain retired by pl_swapchain_colorspace_hint,
+          // otherwise there's a possibility the Wayland color surface will be
+          // held while we try to create a new one.
+          pl_swapchain_colorspace_hint(p->vk->swapchain,
+                                       &(struct pl_color_space){0});
         }
         bool ret = p->params.set_color(sw->ctx, params);
         // To avoid ping-pong between VK_COLOR_SPACE_PASS_THROUGH_EXT and others,

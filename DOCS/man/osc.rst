@@ -175,8 +175,7 @@ Configurable Options
     Default: bottombar
 
     The layout for the OSC. Currently available are: box, slimbox,
-    bottombar, topbar, slimbottombar and slimtopbar. Default pre-0.21.0 was
-    'box'.
+    bottombar, topbar, slimbottombar, slimtopbar and floating.
 
 ``seekbarstyle``
     Default: bar
@@ -238,14 +237,13 @@ Configurable Options
     at the window border opposite to the OSC and the size controls how much
     of the window it will span. Values between 0.0 and 1.0, where 0 means the
     OSC will always popup with mouse movement in the window, and 1 means the
-    OSC will only show up when the mouse hovers it. Default pre-0.21.0 was 0.
-    Default pre-0.42.0 was 0.5.
+    OSC will only show up when the mouse hovers it. Default pre-0.42.0 was 0.5.
 
 ``minmousemove``
     Default: 0
 
     Minimum amount of pixels the mouse has to move between ticks to make
-    the OSC show up. Default pre-0.21.0 was 3.
+    the OSC show up.
 
 ``showwindowed``
     Default: yes
@@ -370,6 +368,16 @@ Configurable Options
     The list of visibility modes to cycle through when calling the
     osc-visibility cycle script message. Modes are separated by ``_``.
 
+``boxwidth``
+    Default: 550
+
+    Width of the ``box`` layout.
+
+``slimboxwidth``
+    Default: 660
+
+    Width of the ``slimbox`` layout.
+
 ``boxmaxchars``
     Default: 80
 
@@ -410,12 +418,11 @@ Configurable Options
     option, margins are only applied when ``visibility`` is set to ``always``.
 
 ``sub_margins``
-    Default: yes
+    Default: no
 
-    Whether to adjust ``--sub-margin-y`` so that subtitles do not overlap
-    with the OSC. The offset is derived from the bottom OSC margin and added
-    on top of the current ``--sub-margin-y`` value. Requires
-    ``dynamic_margins`` or ``visibility=always`` to take effect.
+    Whether to adjust the subtitle margin so that subtitles do not overlap
+    with the OSC. Requires ``dynamic_margins`` or ``visibility=always`` to
+    take effect. Uses ``--sub-margin-y-offset`` to apply the adjustment.
 
     With ``boxvideo`` enabled and ``--sub-use-margins=no``, subtitles are
     already confined to the video area and this option has no additional
@@ -424,11 +431,9 @@ Configurable Options
 ``osd_margins``
     Default: yes
 
-    Whether to adjust ``--osd-margin-y`` so that OSD text does not overlap
-    with the OSC. The offset is derived from the top OSC margin (including
-    window controls when present) and added on top of the current
-    ``--osd-margin-y`` value. Requires ``dynamic_margins`` or
-    ``visibility=always`` to take effect.
+    Whether to adjust the OSD margin so that OSD text does not overlap
+    with the OSC. Requires ``dynamic_margins`` or ``visibility=always`` to
+    take effect. Uses ``--osd-margin-y-offset`` to apply the adjustment.
 
 ``windowcontrols``
     Default: auto (Show window controls if there is no window border/title-bar)
@@ -442,12 +447,6 @@ Configurable Options
     The set of window controls is fixed, offering ``minimize``, ``maximize``,
     and ``quit``. Not all platforms implement ``minimize`` and ``maximize``,
     but ``quit`` will always work.
-
-``windowcontrols_fullscreen``
-    Default: no
-
-    Whether to show window controls in fullscreen mode. Only applies when
-    ``windowcontrols`` is set to ``auto``.
 
 ``windowcontrols_independent``
     Default: yes
@@ -470,6 +469,30 @@ Configurable Options
     String that supports property expansion that will be displayed as the
     windowcontrols title.
     ASS tags are escaped, and newlines and trailing slashes are stripped.
+
+``floatingtitle``
+    Default: yes
+
+    Whether to show the title row in the ``floating`` layout. When enabled,
+    window controls are rendered as compact buttons without a full-width
+    background bar.
+
+``floatingwidth``
+    Default: 700
+
+    Width of the ``floating`` layout.
+
+``floatingalpha``
+    Default: 105
+
+    Alpha of the ``floating`` layout background, 0 (opaque) to 255 (fully
+    transparent).
+
+``tracknumberswidth``
+    Default: 35
+
+    Width of the track number labels next to the audio/subtitle track selector
+    icons. Set to ``0`` to hide track numbers and show only the icons.
 
 ``greenandgrumpy``
     Default: no
@@ -494,6 +517,19 @@ Configurable Options
 
     Use a Unicode minus sign instead of an ASCII hyphen when displaying
     the remaining playback time.
+
+``icon_style``
+    Default: layout
+
+    Selects the icon set used for OSC buttons. Both sets are bundled in the
+    mpv-osd-symbols font.
+
+    ``layout``
+        Select the icon set based on the current layout.
+    ``classic``
+        The original mpv icon set.
+    ``fluent``
+        Icons based on Microsoft's Fluent UI System Icons.
 
 ``background_color``
     Default: #000000
@@ -560,8 +596,16 @@ Configurable Options
 
     Use display fps to calculate the interval between OSC redraws.
 
+``max_thumb_size``
+    Default: 200
+
+    Maximum display size of the preview thumbnail. Only meaningful when a
+    Thumbnailer is active. See the `OSC Preview API`_ section.
+
 The following options configure what commands are run when the buttons are
 clicked. ``mbtn_mid`` commands are also triggered with ``shift+mbtn_left``.
+An option that ends with ``_down_command`` means that the command is
+continuously called while the mouse button is held down.
 
 ``menu_mbtn_left_command=script-binding select/menu; script-message-to osc osc-hide``
 
@@ -641,6 +685,36 @@ clicked. ``mbtn_mid`` commands are also triggered with ``shift+mbtn_left``.
 
 ``fullscreen_mbtn_right_command="cycle window-maximized"``
 
+``skip_backward_mbtn_left_down_command=seek -5``
+
+``skip_backward_mbtn_mid_down_command=frame-back-step``
+
+``skip_backward_mbtn_right_down_command=seek -30``
+
+``skip_forward_mbtn_left_down_command=seek 10``
+
+``skip_forward_mbtn_mid_down_command=frame-step``
+
+``skip_forward_mbtn_right_down_command=seek 60``
+
+``close_mbtn_left_command=quit``
+
+``close_mbtn_mid_command=``
+
+``close_mbtn_right_command=``
+
+``minimize_mbtn_left_command=cycle window-minimized``
+
+``minimize_mbtn_mid_command=``
+
+``minimize_mbtn_right_command=``
+
+``maximize_mbtn_left_command=cycle ${?fullscreen==yes:fullscreen}${!fullscreen==yes:window-maximized}``
+
+``maximize_mbtn_mid_command=``
+
+``maximize_mbtn_right_command=``
+
 Custom Buttons
 ~~~~~~~~~~~~~~
 
@@ -693,3 +767,35 @@ to set auto mode (the default) with ``b``::
     Controls the visibility of the mpv logo on idle. Valid arguments are ``yes``,
     ``no``, and ``cycle`` to toggle between yes and no. If a second argument is
     passed (any value), then the output on the OSD will be silenced.
+
+OSC Preview API
+~~~~~~~~~~~~~~~
+
+The OSC supports displaying preview thumbnails when hovering over the seekbar if
+a compatible thumbnailer script is installed. It communicates with a thumbnailer
+script via the following ``user-data`` properties:
+
+``user-data/osc/draw-preview``
+    Set by the OSC to request a thumbnail within the currently playing file.
+    The requested thumbnail timestamp in seconds is set in
+    ``user-data/osc/hover-sec``. The ``draw-preview`` property is a table with
+    the following fields:
+
+    ``x``, ``y``
+        Top-left coordinates (positive integers) to draw the thumbnail at.
+
+    ``w``, ``h``
+        Width and height (positive non-zero integers) of the area to draw the
+        thumbnail in. Note that this only specifies the drawing width and
+        height, the actual backing thumbnail size may differ.
+
+    ``ass``
+        Optional ASS string to render alongside the thumbnail, using OSD
+        coordinates. This can be used for decorations such as a thumbnail
+        border.
+
+    The OSC sets this property to ``nil`` to signal the thumbnailer to clear
+    the displayed thumbnail.
+
+Avoid installing/enabling multiple thumbnailer script since this api expects
+only one to be active at a time.

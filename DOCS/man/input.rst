@@ -271,7 +271,7 @@ This applies to certain APIs, such as ``mp.command_native()`` (with tables that
 have string keys) in Lua scripting, or ``mpv_command_node()`` (with
 MPV_FORMAT_NODE_MAP) in the C libmpv client API.
 
-The name of the command is provided with a ``name`` string field. The name of
+The name of the command is provided with a ``_name`` string field. The name of
 each command is defined in each command description in the
 `List of Input Commands`_. ``--input-cmdlist`` also lists them. See the
 ``subprocess`` command for an example.
@@ -321,10 +321,6 @@ Playback Control
     By default, ``keyframes`` is used for ``relative``, ``relative-percent``,
     and ``absolute-percent`` seeks, while ``exact`` is used for ``absolute``
     seeks.
-
-    Before mpv 0.9, the ``keyframes`` and ``exact`` flags had to be passed as
-    3rd parameter (essentially using a space instead of ``+``). The 3rd
-    parameter is still parsed, but is considered deprecated.
 
     This is a scalable command. See the documentation of ``nonscalable`` input
     command prefix in `Input Command Prefixes`_ for details.
@@ -932,20 +928,17 @@ OSD Commands
 
     ``file`` specifies the file the raw image data is read from. It can be
     either a numeric UNIX file descriptor prefixed with ``@`` (e.g. ``@4``),
-    or a filename. The file will be mapped into memory with ``mmap()``,
-    copied, and unmapped before the command returns (changed in mpv 0.18.1).
+    or a filename. The file will be read into memory before the command returns.
+    Note that since mpv 0.42.0, if a file descriptor is specified, the file
+    offset of the descriptor will be modified.
 
     It is also possible to pass a raw memory address for use as bitmap memory
     by passing a memory address as integer prefixed with an ``&`` character.
     Passing the wrong thing here will crash the player. This mode might be
     useful for use with libmpv. The ``offset`` parameter is simply added to the
-    memory address (since mpv 0.8.0, ignored before).
+    memory address.
 
     ``offset`` is the byte offset of the first pixel in the source file.
-    (The current implementation always mmap's the whole file from position 0 to
-    the end of the image, so large offsets should be avoided. Before mpv 0.8.0,
-    the offset was actually passed directly to ``mmap``, but it was changed to
-    make using it easier.)
 
     ``fmt`` is a string identifying the image format. Currently, only ``bgra``
     is defined. This format has 4 bytes per pixels, with 8 bits per component.
@@ -973,12 +966,20 @@ OSD Commands
 
     .. note::
 
+        Before mpv 0.42.0, the file was mapped into memory with ``mmap()``,
+        copied, and unmapped before the command returns. Changing the file
+        before the command returns is highly discouraged as this could lead to
+        crashes on versions before 0.42.0.
+
         Before mpv 0.18.1, you had to do manual "double buffering" when updating
-        an overlay by replacing it with a different memory buffer. Since mpv
-        0.18.1, the memory is simply copied and doesn't reference any of the
-        memory indicated by the command's arguments after the command returns.
-        If you want to use this command before mpv 0.18.1, reads the old docs
-        to see how to handle this correctly.
+        an overlay by replacing it with a different memory buffer. If you want
+        to use this command before mpv 0.18.1, read the old docs to see how to
+        handle this correctly.
+
+        Larger offsets should be avoided as mpv versions before 0.42.0 used to
+        mmap the whole file from position 0 to the end of the image. Before mpv
+        0.8.0, the offset was actually passed directly to ``mmap``. Since mpv
+        0.42.0, no mmap happens, so offset is handled by seeking on the file.
 
 ``overlay-remove <id>``
     Remove an overlay added with ``overlay-add`` and the same ID. Does nothing
@@ -1207,10 +1208,11 @@ Execution Commands
 ~~~~~~~~~~~~~~~~~~
 
 ``run <command> [<arg1> [<arg2> [...]]]``
-    Run the given command. Unlike in MPlayer/mplayer2 and earlier versions of
-    mpv (0.2.x and older), this doesn't call the shell. Instead, the command
-    is run directly, with each argument passed separately. Each argument is
-    expanded like in `Property Expansion`_.
+    Run the given command.
+
+    This doesn't call the shell. Instead, the command is run directly, with each
+    argument passed separately. Each argument is expanded like in `Property
+    Expansion`_.
 
     This command has a variable number of arguments, and cannot be used with
     named arguments.
@@ -1295,8 +1297,6 @@ Execution Commands
 
     ``passthrough_stdin`` (``MPV_FORMAT_FLAG``)
         If enabled, wire the new process' stdin to mpv's stdin (default: no).
-        Before mpv 0.33.0, this argument did not exist, but the behavior was as
-        if this was set to true.
 
     The command returns the following result (as ``MPV_FORMAT_NODE_MAP``):
 
@@ -1355,7 +1355,7 @@ Execution Commands
         ::
 
             local r = mp.command_native({
-                name = "subprocess",
+                _name = "subprocess",
                 playback_only = false,
                 capture_stdout = true,
                 args = {"cat", "/proc/cpuinfo"},
@@ -1415,7 +1415,7 @@ Scripting Commands
     1. The string ``key-binding``.
     2. The name of the binding (as established above).
     3. The key state as string (see below).
-    4. The key name (since mpv 0.15.0).
+    4. The key name.
     5. The text the key would produce, or empty string if not applicable.
     6. The scale of the key, such as the ones produced by ``WHEEL_*`` keys.
        The scale is 1 if the key is nonscalable.
@@ -1497,7 +1497,7 @@ Screenshot Commands
     If you combine this command with another one using ``;``, you can use the
     ``async`` flag to make encoding/writing the image file asynchronous. For
     normal standalone commands, this is always asynchronous, and the flag has
-    no effect. (This behavior changed with mpv 0.29.0.)
+    no effect.
 
     On success, returns a ``mpv_node`` with a ``filename`` field set to the
     saved screenshot location.
@@ -1753,6 +1753,22 @@ Miscellaneous Commands
 ``context-menu``
     Show context menu on the video window. See `Context Menu`_ section for details.
 
+``update-clipboard <type> [timeout]``
+    Update the clipboard content so that the ``clipboard`` property reflects
+    up-to-date value. This command is required to update the ``clipboard``
+    property value if ``--clipboard-monitor=no``. ``<type>`` must be ``text``
+    or ``text-primary`` to indicate whether to update clipboard or primary
+    selection. ``[timeout]`` specifies the maximum timeout in ms to wait for
+    the clipboard content to be updated. A negative timeout means infinite.
+    The default timeout is 10 ms.
+
+    This command returns as soon as the clipboard content is updated or the
+    timeout has reached. On some platforms, this command does nothing and
+    returns immediately.
+
+    This command can be asynchronously aborted via API. See `Asynchronous
+    command details`_.
+
 Undocumented commands: ``ao-reload`` (experimental/internal).
 
 List of events
@@ -1813,8 +1829,7 @@ This list uses the event name field value, and the C API symbol in brackets:
             Playback was ended by sending the quit command.
 
         ``error``
-            An error happened. In this case, an ``error`` field is present with
-            the error string.
+            An error happened.
 
         ``redirect``
             Happens with playlists and similar. Details see
@@ -1833,10 +1848,7 @@ This list uses the event name field value, and the C API symbol in brackets:
 
     ``file_error``
         Set to mpv error string describing the approximate reason why playback
-        failed. Unset if no error known. (In Lua scripting, this value was set
-        on the ``error`` field directly. This is deprecated since mpv 0.33.0.
-        In the future, this ``error`` field will be unset for this specific
-        event.)
+        failed. Unset if no error known.
 
     ``playlist_insert_id``
         If loading ended, because the playlist entry to be played was for example
@@ -2057,8 +2069,7 @@ prefixes can be specified. They are separated by whitespace.
 ``repeatable``
     For some commands, keeping a key pressed doesn't run the command repeatedly.
     This prefix forces enabling key repeat in any case. For a list of commands:
-    the first command determines the repeatability of the whole list (up to and
-    including version 0.33 - a list was always repeatable).
+    the first command determines the repeatability of the whole list.
 ``nonrepeatable``
     For some commands, keeping a key pressed runs the command repeatedly.
     This prefix forces disabling key repeat in any case.
@@ -2111,10 +2122,6 @@ command behaves by itself. There are the following cases:
   in detached mode. This can for example happen in cases when a command does not
   have an  asynchronous implementation. The async libmpv API still never blocks
   the caller in these cases.
-
-Before mpv 0.29.0, the ``async`` prefix was only used by screenshot commands,
-and made them run the file saving code in a detached manner. This is the
-default now, and ``async`` changes behavior only in the ways mentioned above.
 
 Currently the following commands have different waiting characteristics with
 sync vs. async: sub-add, audio-add, sub-reload, audio-reload,
@@ -2225,6 +2232,15 @@ Property list
     .. note:: This is only an estimate. (It's computed from two unreliable
               quantities: fps and possibly rounded timestamps.)
 
+``env``
+    Read-only table of all the environment variables. A specific variable can be
+    accessed as a sub-property, e.g. ``${env/HOME}`` returns ``$HOME`` if set.
+
+    .. note:: On certain platforms (e.g Windows) environment variables are case
+              insensitive and so ``${env/PATH}`` and ``${env/Path}`` will
+              resolve to the same thing. However, the returned table will
+              contain the variable name as is without any case-normalization.
+
 ``pid``
     Process-id of mpv.
 
@@ -2270,9 +2286,6 @@ Property list
     Duration of the current file in seconds. If the duration is unknown, the
     property is unavailable. Note that the file duration is not always exactly
     known, so this is an estimate.
-
-    This replaces the ``length`` property, which was deprecated after the
-    mpv 0.9 release. (The semantics are the same.)
 
     This has a sub-property:
 
@@ -2329,11 +2342,6 @@ Property list
 
     ``time-pos/full``
         ``time-pos`` with milliseconds.
-
-``time-start``
-    Deprecated. Always returns 0. Before mpv 0.14, this used to return the start
-    time of the file (could affect e.g. transport streams). See
-    ``--rebase-start-time`` option.
 
 ``time-remaining``
     Remaining length of the file in seconds. Note that the file duration is not
@@ -2403,12 +2411,11 @@ Property list
     restart playback. The number of the first edition is 0.
 
     For Matroska files, this is the edition. For DVD/Blu-ray, this is the title.
+    For MPEG-TS, HLS, and EDL streams, this maps to the underlying program/variant.
 
-    Before mpv 0.31.0, this showed the actual edition selected at runtime, if
-    you didn't set the option or property manually. With mpv 0.31.0 and later,
-    this strictly returns the user-set option or property value, and the
-    ``current-edition`` property was added to return the runtime selected
-    edition (this matters with ``--edition=auto``, the default).
+    This strictly returns the user-set option or property value, and the
+    ``current-edition`` property returns the runtime selected edition (this
+    matters with ``--edition=auto``, the default).
 
 ``current-edition``
     Currently selected edition. This property is unavailable if no file is
@@ -2441,6 +2448,9 @@ Property list
     ``edition-list/N/title``
         Edition title as stored in the file. Not always available.
 
+    ``edition-list/N/metadata``
+        Per-edition metadata key/value pairs.
+
     When querying the property with the client API using ``MPV_FORMAT_NODE``,
     or with Lua ``mp.get_property_native``, this will return a mpv_node with
     the following contents:
@@ -2452,6 +2462,7 @@ Property list
                 "id"                MPV_FORMAT_INT64
                 "title"             MPV_FORMAT_STRING
                 "default"           MPV_FORMAT_FLAG
+                "metadata"          MPV_FORMAT_NODE_MAP
 
 ``metadata``
     Metadata key/value pairs.
@@ -2466,7 +2477,7 @@ Property list
 
     This has a number of sub-properties:
 
-    ``metadata/by-key/<key>``
+    ``metadata/by-key/<key>`` (RW)
         Value of metadata entry ``<key>``.
 
     ``metadata/list/count``
@@ -2541,7 +2552,7 @@ Property list
 
     This also returns ``yes``/true if playback is restarting or if nothing is
     playing at all. In other words, it's only ``no``/false if there's actually
-    video playing. (Behavior since mpv 0.7.0.)
+    video playing.
 
 ``cache-speed``
     Current I/O read speed between the cache and the lower layer (like network).
@@ -2686,8 +2697,7 @@ Property list
 ``mixer-active``
     Whether the audio mixer is active.
 
-    This option is relatively useless. Before mpv 0.18.1, it could be used to
-    infer behavior of the ``volume`` property.
+    This option is relatively useless.
 
 ``ao-volume`` (RW)
     System volume. This property is available only if mpv audio output is
@@ -2760,9 +2770,8 @@ Property list
     seek to refresh the video properly.) You can watch the other hwdec
     properties to see whether this was successful.
 
-    Unlike in mpv 0.9.x and before, this does not return the currently active
-    hardware decoder. Since mpv 0.18.0, ``hwdec-current`` is available for
-    this purpose.
+    This does not return the currently active hardware decoder.
+    ``hwdec-current`` is available for this purpose.
 
 ``hwdec-current``
     The current hardware decoding in use. If decoding is active, return one of
@@ -3149,8 +3158,15 @@ Property list
 
     ``mouse-pos/hover``
         Boolean - whether the mouse pointer hovers the video window. The
-        coordinates should be ignored when this value is false, because the
-        video backends update them only when the pointer hovers the window.
+        coordinates should be ignored when this value is false if no mouse
+        button is being pressed, because the video backends update them only
+        when the pointer hovers the window in this case.
+
+        If a mouse button is pressed while the pointer hovers the video window
+        and then the mouse pointer moves out of window region without releasing
+        the button, some video backends "capture" the pointer and still report
+        the coordinates. In this case, the value of this property may be true or
+        false depending on the video backend.
 
 ``touch-pos``
     Read-only - last known touch point positions, normalized to OSD dimensions.
@@ -3215,6 +3231,38 @@ Property list
             "pad-btns"           MPV_FORMAT_NODE_MAP
                (key and string value for each pad-btn entry)
 
+``dropped-files``
+    Information of the most recent drag-and-drop event mpv received.
+    A client can observe this property to detect when a drag-and-drop event
+    happens. This property is unavailable if no drag-and-drop event has
+    happened.
+
+    Has the following sub-properties:
+
+    ``dropped-files/time``
+        The timestamp of the last drag-and-drop event mpv received, in
+        nanoseconds. This uses the same clock as ``mpv_get_time_ns()``.
+
+    ``dropped-files/action``
+        The action of the drag-and-drop event. This is normally ``replace``.
+        Depending on the platform, this can also be ``append`` in some cases,
+        such as shift key being held while files are dropped.
+
+    ``dropped-files/files``
+        The dropped file names of the drag-and-drop event.
+
+    When querying the property with the client API using ``MPV_FORMAT_NODE``,
+    or with Lua ``mp.get_property_native``, this will return a mpv_node with
+    the following contents:
+
+    ::
+
+        MPV_FORMAT_NODE_MAP
+            "time"    MPV_FORMAT_INT64
+            "action"  MPV_FORMAT_STRING
+            "files"   MPV_FORMAT_NODE_ARRAY
+                MPV_FORMAT_STRING
+
 ``sub-ass-extradata``
     The current ASS subtitle track's extradata. There is no formatting done.
     The extradata is returned as a string as-is. This property is not
@@ -3274,6 +3322,29 @@ Property list
 ``secondary-sub-end``
     Same as ``sub-end``, but for the secondary subtitles.
 
+``sub-lines``
+    The list of subtitle lines in memory. Not available if the subtitle is not
+    text-based (i.e. DVD/BD subtitles).
+
+    When querying the property with the client API using ``MPV_FORMAT_NODE``,
+    or with Lua ``mp.get_property_native``, this will return a mpv_node with
+    the following contents:
+
+    ::
+
+        MPV_FORMAT_NODE_ARRAY
+            MPV_FORMAT_NODE_MAP (for each subtitle line)
+                "text"  MPV_FORMAT_STRING
+                "start" MPV_FORMAT_DOUBLE
+                "end"   MPV_FORMAT_DOUBLE
+
+    ASS tags are stripped from ``text``.
+
+    ``end`` is absent if unknown.
+
+``secondary-sub-lines``
+    Same as ``sub-lines``, but for the secondary subtitles.
+
 ``playlist-pos`` (RW)
     Current position on playlist. The first entry is on position 0. Writing to
     this property may start playback at the new position.
@@ -3285,8 +3356,6 @@ Property list
     "current", this property returns -1. Likewise, writing -1 will put the
     player into idle mode (or exit playback if idle mode is not enabled). If an
     out of range index is written to the property, this behaves as if writing -1.
-    (Before mpv 0.33.0, instead of returning -1, this property was unavailable
-    if no playlist entry was current.)
 
     Writing the current value back to the property will have no effect.
     Use ``playlist-play-index`` to restart the playback of the current entry if
@@ -3383,14 +3452,15 @@ Property list
         MPV_FORMAT_NODE_ARRAY
             MPV_FORMAT_NODE_MAP (for each playlist entry)
                 "filename"      MPV_FORMAT_STRING
-                "current"       MPV_FORMAT_FLAG (might be missing; since mpv 0.7.0)
+                "current"       MPV_FORMAT_FLAG (might be missing)
                 "playing"       MPV_FORMAT_FLAG (same)
                 "title"         MPV_FORMAT_STRING (optional)
                 "id"            MPV_FORMAT_INT64
                 "playlist-path" MPV_FORMAT_STRING (optional)
 
 ``track-list``
-    List of audio/video/sub tracks, current entry marked.
+    List of audio/video/sub tracks, current entry marked. When the file has
+    editions, only tracks belonging to the currently selected edition are listed.
 
     This has a number of sub-properties. Replace ``N`` with the 0-based track
     index.
@@ -3464,7 +3534,13 @@ Property list
         The bitrate of the HLS stream, if available.
 
     ``track-list/N/program-id``
-        The program ID of the HLS stream, if available.
+        The first program ID this stream belongs to, if any. Deprecated,
+        use ``track-list/N/program-ids``.
+
+    ``track-list/N/program-ids``
+        A list of all program IDs this stream belongs to. A stream can belong
+        to more than one program (e.g. in MPEG-TS or HLS). Unavailable if the
+        stream does not belong to any program.
 
     ``track-list/N/codec``
         The codec name used by this track, for example ``h264``. Unavailable
@@ -3591,6 +3667,7 @@ Property list
                 "hearing-impaired"  MPV_FORMAT_FLAG
                 "hls-bitrate"       MPV_FORMAT_INT64
                 "program-id"        MPV_FORMAT_INT64
+                "program-ids"       MPV_FORMAT_NODE_ARRAY[MPV_FORMAT_INT64]
                 "selected"          MPV_FORMAT_FLAG
                 "main-selection"    MPV_FORMAT_INT64
                 "external"          MPV_FORMAT_FLAG
@@ -3637,6 +3714,8 @@ Property list
 
     If tracks of the requested type are selected via ``--lavfi-complex``, the
     first one is returned.
+
+    Note that this property cannot be used directly, a sub-property is required.
 
 ``chapter-list`` (RW)
     List of chapters, current entry marked.
@@ -3914,6 +3993,10 @@ Property list
         the left, right, top, and bottom margins respectively.
         Values are between 0.0 and 1.0, normalized to window width/height.
 
+    ``user-data/osc/draw-preview``
+        Used to communicate between osc and compatible thumbnailer (if
+        installed). See `OSC Preview API`_ section for more details.
+
     ``user-data/mpv/ytdl``
         Data shared by the builtin ytdl hook script.
 
@@ -3929,6 +4012,9 @@ Property list
 
     ``user-data/mpv/console/open``
         Whether the console is open.
+
+    ``user-data/mpv/context-menu/open``
+        Whether the context menu script is open.
 
 ``menu-data`` (RW)
     This property stores the raw menu definition. See `Context Menu`_ section for details.
@@ -4201,9 +4287,12 @@ Property list
                 "vararg"  MPV_FORMAT_FLAG
                 "args"    MPV_FORMAT_NODE_ARRAY
                     MPV_FORMAT_NODE_MAP
-                        "name"     MPV_FORMAT_STRING
-                        "type"     MPV_FORMAT_STRING
-                        "optional" MPV_FORMAT_FLAG
+                        "name"           MPV_FORMAT_STRING
+                        "type"           MPV_FORMAT_STRING
+                        "optional"       MPV_FORMAT_FLAG
+                        "default-value"  MPV_FORMAT_NODE (optional, value of "type")
+                        "choices"        MPV_FORMAT_NODE_ARRAY (optional)
+                            MPV_FORMAT_STRING
 
 ``input-bindings``
     The list of current input key bindings. This returns an array of maps,
@@ -4280,6 +4369,13 @@ Property list
         does not have this limitation.
         See ``current-clipboard-backend`` property for more details.
 
+    .. warning::
+
+        Since mpv 0.42.0, this property does not return the current clipboard
+        content on certain platforms if ``--clipboard-monitor=no``.
+        When reading clipboard content, you must run ``update-clipboard``
+        command to update the clipboard content manually in this case.
+
     ::
 
         MPV_FORMAT_NODE_MAP
@@ -4304,8 +4400,6 @@ caveats with some properties (due to historical reasons):
     example, if you set ``aid=5``, and the currently played file contains no
     audio track with ID 5, the ``aid`` property will return ``no``.
 
-    Before mpv 0.31.0, you could set existing tracks at runtime only.
-
 ``display-fps``
     This inconsistent behavior is deprecated. Post-deprecation, the reported
     value and the option value are cleanly separated (``override-display-fps``
@@ -4316,10 +4410,6 @@ caveats with some properties (due to historical reasons):
     reinitialize, the option will be set, but the runtime filter chain does not
     change. On the other hand, the next video to be played will fail, because
     the initial filter chain cannot be created.
-
-    This behavior changed in mpv 0.31.0. Before this, the new value was rejected
-    *iff* a video (for ``vf``) or an audio (for ``af``) track was active. If
-    playback was not active, the behavior was the same as the current one.
 
 ``playlist``
     The property is read-only and returns the current internal playlist. The

@@ -336,8 +336,10 @@ g-e
     Select an MKV edition or DVD/Blu-ray title.
 
 g-l
-    Select a subtitle line to seek to. This currently requires ``ffmpeg`` in
-    ``PATH``, or in the same folder as mpv on Windows.
+    Select a subtitle line to seek to.
+
+g-L
+    Select a secondary subtitle line to seek to.
 
 g-d
     Select an audio device.
@@ -440,12 +442,10 @@ because ``--fs`` is a flag option that requires no parameter. If an option
 changes and its parameter becomes optional, then a command line using the
 alternative syntax will break.
 
-Until mpv 0.31.0, there was no difference whether an option started with ``--``
-or a single ``-``. Newer mpv releases strictly expect that you pass the option
-value after a ``=``. For example, before ``mpv --log-file f.txt`` would write
-a log to ``f.txt``, but now this command line fails, as ``--log-file`` expects
-an option value, and ``f.txt`` is simply considered a normal file to be played
-(as in ``mpv f.txt``).
+For options starting with ``--``, mpv expects that you pass the option value
+after a ``=``. For example, ``mpv --log-file f.txt`` will fail, as
+``--log-file`` expects an option value, and ``f.txt`` is simply considered a
+normal file to be played (as in ``mpv f.txt``).
 
 The future plan is that ``-option value`` will not work anymore, and options
 with a single ``-`` behave the same as ``--`` options.
@@ -484,9 +484,9 @@ quotes.
 
 The ``[...]`` form of quotes wraps everything between ``[`` and ``]``. It's
 useful with shells that don't interpret these characters in the middle of
-an argument (like bash). These quotes are balanced (since mpv 0.9.0): the ``[``
-and ``]`` nest, and the quote terminates on the last ``]`` that has no matching
-``[`` within the string. (For example, ``[a[b]c]`` results in ``a[b]c``.)
+an argument (like bash). These quotes are balanced: the ``[`` and ``]`` nest,
+and the quote terminates on the last ``]`` that has no matching ``[`` within the
+string. (For example, ``[a[b]c]`` results in ``a[b]c``.)
 
 The fixed-length quoting syntax is intended for use with external
 scripts and programs.
@@ -702,8 +702,6 @@ If you want to pass a value without interpreting it for escapes or ``,``, it is
 recommended to use the ``-append`` variant. When using libmpv, prefer using
 ``MPV_FORMAT_NODE_MAP``; when using a scripting backend or the JSON IPC, use an
 appropriate structured data type.
-
-Prior to mpv 0.33, ``:`` was also recognized as separator by ``-set``.
 
 Object settings list options
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1443,22 +1441,28 @@ PROTOCOLS
 
     Only works with seekable streams.
 
-    Examples::
+    .. admonition:: Example
 
-      mpv slice://1g-2g@cap.ts
+        ::
 
-      This starts reading from cap.ts after seeking 1 GiB, then
-      reads until reaching 2 GiB or end of file.
+            mpv slice://1g-2g@cap.ts
 
-      mpv slice://1g-+2g@cap.ts
+        This starts reading from cap.ts after seeking 1 GiB, then
+        reads until reaching 2 GiB or end of file.
 
-      This starts reading from cap.ts after seeking 1 GiB, then
-      reads until reaching 3 GiB or end of file.
+        ::
 
-      mpv slice://100m@appending://cap.ts
+            mpv slice://1g-+2g@cap.ts
 
-      This starts reading from cap.ts after seeking 100MiB, then
-      reads until end of file.
+        This starts reading from cap.ts after seeking 1 GiB, then
+        reads until reaching 3 GiB or end of file.
+
+        ::
+
+            mpv slice://100m@appending://cap.ts
+
+        This starts reading from cap.ts after seeking 100MiB, then
+        reads until end of file.
 
 ``null://``
 
@@ -1473,6 +1477,20 @@ PROTOCOLS
 ``hex://data``
 
     Like ``memory://``, but the string is interpreted as hexdump.
+
+``archive://[ARCHIVE PATH]|[FILE PATH IN ARCHIVE]``
+
+    Open a file at the specified path inside an archive. Requires libarchive
+    feature enabled. The archive path must have all ``%`` and ``|`` characters
+    URL escaped. The file path should not be URL escaped.
+
+    .. admonition:: Example
+
+        ::
+
+            mpv "archive://file.zip|video.mkv"
+
+        This will play ``video.mkv`` in the archive file ``file.zip``.
 
 PSEUDO GUI MODE
 ===============
@@ -1502,7 +1520,7 @@ The profile is currently defined as follows:
     [builtin-pseudo-gui]
     terminal=no
     force-window=yes
-    idle=once
+    idle=yes
     screenshot-directory=~~desktop/
 
 The ``pseudo-gui`` profile exists for compatibility. The options in the
