@@ -40,6 +40,7 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 500M
+      DOWNLOAD_CACHE: ${{ github.workspace }}/.ccache/downloads
       TARGET: ${{ matrix.arch }}-w64-mingw32
       RUST_TARGET: ${{ matrix.arch }}-pc-windows-gnu
     strategy:
@@ -58,7 +59,7 @@ jobs:
         run: echo "timestamp=`date +%s%N`" >> $GITHUB_OUTPUT
 
       - name: Restore cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ env.TARGET }}-${{ steps.get_time.outputs.timestamp }}
@@ -116,13 +117,13 @@ jobs:
           PR=${{ github.event.pull_request.number && format('-pr{0}', github.event.pull_request.number) || '' }}
           echo "name=mpv-$VER$PR-${{ github.run_id }}-$TARGET" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.artifact.outputs.name }}
           path: artifact/*
 
       - name: Save Cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         if: always()
         with:
           path: ${{ env.CCACHE_DIR }}
@@ -164,11 +165,18 @@ jobs:
           "timestamp=$((Get-Date).Ticks)" >> $env:GITHUB_OUTPUT
 
       - name: Restore cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ matrix.target }}-${{ steps.get_time.outputs.timestamp }}
           restore-keys: ${{ matrix.target }}-
+
+      - name: Install Winget on windows-11-arm
+        if: matrix.os == 'windows-11-arm'
+        shell: pwsh
+        run: |
+          Install-Module -Name Microsoft.WinGet.Client -Repository PSGallery -Force
+          Repair-WinGetPackageManager -Latest -Force
 
       - name: Install dependencies
         run: |
@@ -236,7 +244,7 @@ jobs:
           $name = "mpv-$VER$PR-${{ github.run_id }}-${{ matrix.target }}"
           "name=$name" >> $env:GITHUB_OUTPUT
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.artifact.outputs.name }}
           path: |
@@ -246,14 +254,14 @@ jobs:
             !build/mpv.lib
             !build/mpv.pdb
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.artifact.outputs.name }}-pdb
           path: |
             build/mpv.pdb
 
       - name: Save Cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         if: always()
         with:
           path: ${{ env.CCACHE_DIR }}
@@ -303,7 +311,7 @@ jobs:
             brew update
           fi
           if brew list ffmpeg &> /dev/null; then brew unlink ffmpeg; fi
-          brew install -q autoconf automake pkgconf libtool python freetype fribidi little-cms2 \
+          brew install -q autoconf automake curl pkgconf libtool python freetype fribidi little-cms2 \
             luajit libass ffmpeg-full meson rust uchardet mujs libplacebo molten-vk vulkan-loader vulkan-headers \
             libarchive libbluray libcaca libcdio-paranoia libdvdnav rubberband zimg
           brew link ffmpeg-full
@@ -347,7 +355,7 @@ jobs:
           PR=${{ github.event.pull_request.number && format('-pr{0}', github.event.pull_request.number) || '' }}
           echo "name=mpv-$VER$PR-${{ github.run_id }}-$TARGET" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: ${{ matrix.arch != 'test' }}
         with:
           name: ${{ steps.artifact.outputs.name }}
@@ -432,6 +440,7 @@ jobs:
           apk update
           apk add \
               binutils \
+              curl-dev \
               ffmpeg-dev \
               gcc \
               git \
@@ -479,13 +488,14 @@ jobs:
     steps:
     - uses: actions/checkout@v6
     - name: Test in OpenBSD VM
-      uses: cross-platform-actions/action@v0.30.0
+      uses: cross-platform-actions/action@v1.0.0
       with:
         operating_system: openbsd
         version: '7.8'
         run: |
             sudo pkg_add -U \
                 cmake \
+                curl \
                 ffmpeg \
                 git \
                 libarchive \
@@ -525,15 +535,16 @@ jobs:
     steps:
     - uses: actions/checkout@v6
     - name: Test in FreeBSD VM
-      uses: cross-platform-actions/action@v0.30.0
+      uses: cross-platform-actions/action@v1.0.0
       with:
         operating_system: freebsd
-        version: '14.3'
+        version: '15.0'
         run: |
             sudo pkg update
             sudo pkg install -y \
                 alsa-lib \
                 cmake \
+                curl \
                 evdev-proto \
                 ffmpeg \
                 git \
@@ -618,6 +629,7 @@ jobs:
             ca-certificates:p
             cc:p
             cppwinrt:p
+            curl:p
             ffmpeg:p
             lcms2:p
             libarchive:p
